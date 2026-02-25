@@ -1,0 +1,511 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PCP Panel 3</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script src="./shared.js"></script>
+
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+    #vis { width: 100vw; height: 100vh; }
+
+    #foldBtn{
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-130%);
+  z-index: 9999;
+
+  padding: 8px 14px;
+  font-size: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.2);
+  background: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+}
+  </style>
+</head>
+
+<body>
+  <div id="vis"></div>
+  <button id="foldBtn">Fold device</button>
+
+  <script>
+    const PANEL_ROLE = "panel3";
+    const PANEL_DIMS = ["ball_recovery", "shots_total"];
+
+    const PAD = { top: 10, left: 18, right: 14, bottom: 18 };
+
+    // PCP plot occupies left 2/3 of INNER width; right 1/3 is label space.
+    const PCP_FRAC = 2 / 3;
+
+    // Label layout tuning
+    const LABEL_X_PAD = 18;         // to the right of last axis
+    const LABEL_LIMIT_PAD = 10;     // keep text inside view
+    const LABEL_FONT = 12;
+    const LABEL_LINE_H = 12;        // line-height for 2-line names, FAILEDddd :C
+    const LABEL_DY_STEP = 10;       // small stable offset by rank
+    const LABEL_GLOBAL_LIFT = 14;   // lift whole stack up a bit more
+
+    const WINDOW_ID = crypto.randomUUID();
+    let applyingRemote = false;
+    const PCP_CHANNEL = window.PCP_CHANNEL;
+
+    // sizing helpers
+    function getOuterSide() {
+      return Math.floor(Math.min(window.innerWidth, window.innerHeight));
+    }
+
+    function computeInnerBox(outerSide, pad) {
+      const innerW = Math.max(10, outerSide - pad.left - pad.right);
+      const innerH = Math.max(10, outerSide - pad.top - pad.bottom);
+      const plotW  = Math.max(10, Math.floor(innerW * PCP_FRAC)); // PCP occupies left 2/3
+      const labelW = Math.max(10, innerW - plotW);                // label area width
+      return { outerSide, innerW, innerH, plotW, labelW };
+    }
+
+    // fold mechanics
+    function doFoldLocal() {
+      if (PANEL_ROLE === "panel1") {
+        window.location.href = "./radar.html";
+      } else {
+        try { window.close(); } catch (e) {}
+      }
+    }
+
+    function handleFoldMessage(msg) {
+      if (!msg || msg.sender === WINDOW_ID) return;
+      if (msg.type !== "fold") return;
+      doFoldLocal();
+    }
+
+    // JS hit testing helpers
+    function linearScale(domain, range) {
+      const [d0, d1] = domain;
+      const [r0, r1] = range;
+      const m = (r1 - r0) / (d1 - d0);
+      return (v) => r0 + (v - d0) * m;
+    }
+
+    function distPointToSegment(px, py, x1, y1, x2, y2) {
+      const vx = x2 - x1, vy = y2 - y1;
+      const wx = px - x1, wy = py - y1;
+      const c1 = vx * wx + vy * wy;
+      if (c1 <= 0) return Math.hypot(px - x1, py - y1);
+      const c2 = vx * vx + vy * vy;
+      if (c2 <= c1) return Math.hypot(px - x2, py - y2);
+      const t = c1 / c2;
+      const projx = x1 + t * vx, projy = y1 + t * vy;
+      return Math.hypot(px - projx, py - projy);
+    }
+
+    function specPanel3(innerW, innerH, plotW, labelW) {
+      return {
+        $schema: "https://vega.github.io/schema/vega/v5.json",
+        width: innerW,
+        height: innerH,
+        padding: PAD,
+
+        signals: [
+          { name: "selectedId", value: null },
+          { name: "selectedDim", value: null },
+          { name: "plotW", value: plotW },
+          { name: "innerW", value: innerW },
+          { name: "innerH", value: innerH }
+        ],
+
+        data: [
+          { name: "table", values: window.DATA },
+
+          // long-form points for PCP lines
+          {
+            name: "points",
+            source: "table",
+            transform: [
+              { type: "fold", fields: PANEL_DIMS, as: ["dim", "val"] },
+              { type: "formula", as: "v", expr: "toNumber(datum.val)" }
+            ]
+          },
+
+          // one row per player for end labels
+          {
+            name: "labelRows",
+            source: "table",
+            transform: [
+              { type: "formula", as: "st", expr: "toNumber(datum.shots_total)" },
+              { type: "window", sort: { field: "st", order: "descending" }, ops: ["row_number"], as: ["rank"] },
+              { type: "formula", as: "dyRank", expr: "(datum.rank - 1) * " + LABEL_DY_STEP + " - " + LABEL_GLOBAL_LIFT }
+            ]
+          }
+        ],
+
+        scales: [
+          // X only spans PCP region; label area is inside view to the right
+          { name: "x", type: "point", domain: PANEL_DIMS, range: [0, plotW], padding: 0 },
+
+          ...PANEL_DIMS.map(dim => ({
+            name: "y_" + dim,
+            type: "linear",
+            domain: window.EXTENTS[dim],
+            range: [innerH, 0],
+            nice: false,
+            zero: false
+          })),
+
+         
+        
+          {
+            name: "c",
+            type: "ordinal",
+            domain: { data: "table", field: "id" },
+            range: ["#1f77ff", "#2a8530", "#9b51e0"]
+          }
+        ],
+
+        marks: [
+          // axes
+          {
+            type: "group",
+            encode: { update: { x: { signal: "scale('x','ball_recovery')" } } },
+            axes: [{ orient: "left", scale: "y_ball_recovery", title: null, labels: false }]
+          },
+          {
+            type: "group",
+            encode: { update: { x: { signal: "scale('x','shots_total')" } } },
+            axes: [{ orient: "left", scale: "y_shots_total", title: null }]
+          },
+
+         
+        // Axis highlight
+          {
+            type: "rule",
+            encode: {
+            update: {
+            x: {
+              signal:
+              "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : " +
+              "selectedDim==='shots_total' ? scale('x','shots_total') : 0"
+            },
+            y: { value: 0 },
+            y2: { signal: "height" },
+
+      // yellow-orangish highlight
+      stroke: { value: "#f4b400" },
+
+      
+      strokeOpacity: {
+        signal: "(selectedDim==='ball_recovery' || selectedDim==='shots_total') ? 0.85 : 0"
+      },
+      strokeWidth: {
+        signal: "(selectedDim==='ball_recovery' || selectedDim==='shots_total') ? 10 : 0"
+      }
+    }
+  }
+},
+
+          // PCP lines (colored; when selected, others gray)
+          {
+            type: "group",
+            from: { facet: { name: "series", data: "points", groupby: "id" } },
+            marks: [
+              {
+                type: "line",
+                from: { data: "series" },
+                encode: {
+                  enter: {
+                    interpolate: { value: "linear" },
+                    strokeWidth: { value: 2 }
+                  },
+                  update: {
+                    x: { scale: "x", field: "dim" },
+                    y: { signal: "scale('y_' + datum.dim, datum.v)" },
+
+                    stroke: [
+                      { test: "selectedId != null && datum.id !== selectedId", value: "#b5b5b5" },
+                      { scale: "c", field: "id" }
+                    ],
+                    strokeOpacity: [
+                      { test: "selectedId != null && datum.id !== selectedId", value: 0.35 },
+                      { value: 0.9 }
+                    ],
+                    strokeWidth: [
+                      { test: "selectedId != null && datum.id === selectedId", value: 4 },
+                      { value: 2 }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+
+          // value labels on selected axis
+          {
+            type: "text",
+            from: { data: "table" },
+            encode: {
+              update: {
+                // only show when an axis is selected
+                opacity: {
+                  signal:
+                    "(selectedDim==='ball_recovery' || selectedDim==='shots_total') ? " +
+                    "(selectedId!=null ? (datum.id===selectedId ? 1 : 0.35) : 1) : 0"
+                },
+
+                x: {
+                  signal:
+                    "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : " +
+                    "selectedDim==='shots_total' ? (scale('x','shots_total') + " + LABEL_X_PAD + ") : 0"
+                },
+                y: {
+                  signal:
+                    "selectedDim==='ball_recovery' ? scale('y_ball_recovery', toNumber(datum.ball_recovery)) : " +
+                    "selectedDim==='shots_total' ? scale('y_shots_total', toNumber(datum.shots_total)) : 0"
+                },
+
+                text: {
+                  signal:
+                    "selectedDim==='ball_recovery' ? ''+datum.ball_recovery : " +
+                    "selectedDim==='shots_total' ? ''+datum.shots_total : ''"
+                },
+
+                fontSize: { value: 12 },
+                baseline: { value: "middle" },
+                align: { value: "left" },
+
+                fill: [
+                  { test: "selectedId != null && datum.id !== selectedId", value: "#9a9a9a" },
+                  { value: "#111" }
+                ],
+
+                limit: {
+                  signal:
+                    "selectedDim==='shots_total' ? (innerW - (scale('x','shots_total') + " + LABEL_X_PAD + ") - " + LABEL_LIMIT_PAD + ") : 9999"
+                }
+              }
+            }
+          },
+          // Selected axis name label (vertical, bold, light-gray background)
+{
+  type: "text",
+  encode: {
+    update: {
+      opacity: {
+        signal: "(selectedDim==='ball_recovery' || selectedDim==='shots_total') ? 1 : 0"
+      },
+
+      // align with selected axis x
+      x: {
+        signal:
+          "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : " +
+          "selectedDim==='shots_total' ? scale('x','shots_total') : 0"
+      },
+
+      // place at bottom area (inside view)
+      // y: { signal: "height - 6" },
+      y: { signal: "height/2" },
+
+     
+      angle: { value: -90 },
+
+      // text: { signal: "selectedDim" },
+      text: {
+  signal: "replace(selectedDim, '_', ' ')"},
+
+      fontWeight: { value: "bold" },
+      fontSize: { value: 12 },
+      fill: { value: "#111" },
+
+      // center  around the axis line
+      align: { value: "center" },
+      baseline: { value: "middle" },
+
+      // light gray background behind text, FAILEDDDddd
+      background: { value: "rgba(0,0,0,0.10)" },
+      padding: { value: 6 },
+      cornerRadius: { value: 4 }
+    }
+  }
+},
+
+          // permanent player name labels at end colored; when selected, others gray
+          // two lines won't work. need to figure out why!!!
+          {
+            type: "text",
+            from: { data: "labelRows" },
+            encode: {
+              update: {
+                x: { signal: "scale('x','shots_total') + " + LABEL_X_PAD },
+
+                y: {
+                  signal:
+                    "clamp(scale('y_shots_total', datum.st) + datum.dyRank, 12, innerH - 28)"
+                },
+
+                
+                text: {
+                  signal:
+                    "split(datum.label,' ')[0] + " +
+                    "(length(split(datum.label,' ')) > 1 ? '\\n' + join(slice(split(datum.label,' '), 1), ' ') : '')"
+                },
+
+                lineHeight: { value: LABEL_LINE_H },
+                fontSize: { value: LABEL_FONT },
+                baseline: { value: "middle" },
+                align: { value: "left" },
+
+                fill: [
+                  { test: "selectedId != null && datum.id !== selectedId", value: "#b0b0b0" },
+                  { scale: "c", field: "id" }
+                ],
+                fontWeight: [
+                  { test: "selectedId != null && datum.id === selectedId", value: "bold" },
+                  { value: "normal" }
+                ],
+                opacity: [
+                  { test: "selectedId != null && datum.id !== selectedId", value: 0.45 },
+                  { test: "selectedId != null && datum.id === selectedId", value: 1.0 },
+                  { value: 0.9 }
+                ],
+
+                limit: { signal: "innerW - (scale('x','shots_total') + " + LABEL_X_PAD + ") - " + LABEL_LIMIT_PAD }
+              }
+            }
+          }
+        ]
+      };
+    }
+
+    // render
+    let currentView = null;
+
+    async function render() {
+      if (currentView) {
+        try { currentView.finalize(); } catch (e) {}
+        currentView = null;
+      }
+      const mount = document.getElementById("vis");
+      mount.innerHTML = "";
+
+      const outerSide = getOuterSide();
+      const { innerW, innerH, plotW, labelW } = computeInnerBox(outerSide, PAD);
+
+      const embed = await vegaEmbed("#vis", specPanel3(innerW, innerH, plotW, labelW), {
+        actions: false,
+        renderer: "canvas"
+      });
+
+      const view = embed.view;
+      currentView = view;
+
+      const TOTAL_W = innerW + PAD.left + PAD.right;
+      const TOTAL_H = innerH + PAD.top + PAD.bottom;
+
+      // PCP axes positions (within PCP region only)
+      const axisX = { ball_recovery: 0, shots_total: plotW };
+
+      const yMap = {
+        ball_recovery: linearScale(window.EXTENTS.ball_recovery, [innerH, 0]),
+        shots_total: linearScale(window.EXTENTS.shots_total, [innerH, 0])
+      };
+
+      function broadcastState(nextId, nextDim) {
+        PCP_CHANNEL.postMessage({ type: "state", id: nextId, dim: nextDim, sender: WINDOW_ID });
+      }
+
+      function setState(nextId, nextDim, doBroadcast = true) {
+        view.signal("selectedId", nextId);
+        view.signal("selectedDim", nextDim);
+        view.runAsync();
+        if (doBroadcast && !applyingRemote) broadcastState(nextId, nextDim);
+      }
+
+      function onCanvasClick(evt) {
+        const canvas = document.querySelector("#vis canvas");
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+
+        // map click to full Vega view coords (includes padding)
+        const vx = (evt.clientX - rect.left) * (TOTAL_W / rect.width);
+        const vy = (evt.clientY - rect.top)  * (TOTAL_H / rect.height);
+
+        // inner coords
+        const x = vx - PAD.left;
+        const y = vy - PAD.top;
+
+        // Only allow interaction inside PCP region (ignore label area on the right)
+        if (x < -5 || x > plotW + 5 || y < -5 || y > innerH + 5) return;
+
+        // Axis click => select axis, clear line
+        const AXIS_THRESH = 16;
+        for (const dim of PANEL_DIMS) {
+          if (Math.abs(x - axisX[dim]) <= AXIS_THRESH) {
+            const curDim = view.signal("selectedDim");
+            const nextDim = (curDim === dim) ? null : dim;
+            setState(null, nextDim, true);
+            return;
+          }
+        }
+
+        // Line click => select line, clear axis
+        const LINE_THRESH = 10;
+        let best = { id: null, d: Infinity };
+
+        for (const row of window.DATA) {
+          const x1 = axisX.ball_recovery;
+          const y1 = yMap.ball_recovery(Number(row.ball_recovery));
+          const x2 = axisX.shots_total;
+          const y2 = yMap.shots_total(Number(row.shots_total));
+
+          const d = distPointToSegment(x, y, x1, y1, x2, y2);
+          if (d < best.d) best = { id: row.id, d };
+        }
+
+        if (best.d <= LINE_THRESH) {
+          const curId = view.signal("selectedId");
+          const nextId = (curId === best.id) ? null : best.id;
+          setState(nextId, null, true);
+        }
+      }
+
+      const canvas = document.querySelector("#vis canvas");
+      if (canvas) canvas.addEventListener("click", onCanvasClick);
+
+      // receive remote state + fold
+      PCP_CHANNEL.onmessage = (e) => {
+        const msg = e.data;
+
+        // fold first
+        handleFoldMessage(msg);
+
+        // state sync
+        if (!msg || msg.sender === WINDOW_ID) return;
+        if (msg.type !== "state") return;
+
+        applyingRemote = true;
+        setState(msg.id ?? null, msg.dim ?? null, false);
+        applyingRemote = false;
+      };
+    }
+
+    render().catch(console.error);
+
+    // keep sizing consistent on resize
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => render().catch(console.error), 80);
+    });
+
+    // fold button
+    document.getElementById("foldBtn").addEventListener("click", () => {
+      PCP_CHANNEL.postMessage({ type: "fold", sender: WINDOW_ID });
+      doFoldLocal();
+    });
+  </script>
+</body>
+</html>

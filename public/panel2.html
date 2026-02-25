@@ -1,0 +1,402 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PCP Panel 2</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script src="./shared.js"></script>
+
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+    #vis{
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="vis"></div>
+
+  <script>
+    const PANEL_ROLE = "panel2";
+    const PANEL_DIMS = ["assist", "pass_accurate", "ball_recovery"];
+
+    const PAD = { top: 10, left: 18, right: 14, bottom: 18 };
+
+    const WINDOW_ID = crypto.randomUUID();
+    let applyingRemote = false;
+    const PCP_CHANNEL = window.PCP_CHANNEL;
+
+    // sizing helpers
+    function getOuterSide() {
+      return Math.floor(Math.min(window.innerWidth, window.innerHeight));
+    }
+    function computeInnerBox(outerSide, pad) {
+      const innerW = Math.max(10, outerSide - pad.left - pad.right);
+      const innerH = Math.max(10, outerSide - pad.top - pad.bottom);
+      return { outerSide, innerW, innerH };
+    }
+
+    // fold mechanics
+    function doFoldLocal() {
+      if (PANEL_ROLE === "panel1") {
+        window.location.href = "./radar.html";
+      } else {
+        try { window.close(); } catch (e) {}
+      }
+    }
+    function handleFoldMessage(msg) {
+      if (!msg || msg.sender === WINDOW_ID) return;
+      if (msg.type !== "fold") return;
+      doFoldLocal();
+    }
+
+    function specPanel2(innerW, innerH) {
+      return {
+        $schema: "https://vega.github.io/schema/vega/v5.json",
+        width: innerW,
+        height: innerH,
+        padding: PAD,
+
+        signals: [
+          { name: "selectedId", value: null },
+          { name: "selectedDim", value: null },
+          { name: "innerW", value: innerW },
+          { name: "innerH", value: innerH }
+        ],
+
+        data: [
+          { name: "table", values: window.DATA },
+          {
+            name: "points",
+            source: "table",
+            transform: [
+              { type: "fold", fields: PANEL_DIMS, as: ["dim", "val"] },
+              { type: "formula", as: "v", expr: "toNumber(datum.val)" }
+            ]
+          }
+        ],
+
+        scales: [
+          { name: "x", type: "point", domain: PANEL_DIMS, range: [0, innerW], padding: 0 },
+
+          ...PANEL_DIMS.map(dim => ({
+            name: "y_" + dim,
+            type: "linear",
+            domain: window.EXTENTS[dim],
+            range: [innerH, 0],
+            nice: false,
+            zero: false
+          })),
+
+          {
+            name: "c",
+            type: "ordinal",
+            domain: { data: "table", field: "id" },
+            range: ["#1f77ff", "#2a8530", "#9b51e0"]
+          }
+        ],
+
+        marks: [
+          // axes 
+          {
+            type: "group",
+            encode: { update: { x: { signal: "scale('x','assist')" } } },
+            axes: [{ orient: "left", scale: "y_assist", title: null, labels: false }]
+          },
+          {
+            type: "group",
+            encode: { update: { x: { signal: "scale('x','pass_accurate')" } } },
+            axes: [{ orient: "left", scale: "y_pass_accurate", title: null }]
+          },
+          {
+            type: "group",
+            encode: { update: { x: { signal: "scale('x','ball_recovery')" } } },
+            axes: [{ orient: "left", scale: "y_ball_recovery", title: null }]
+          },
+
+          // fat yellow-orange axis highlight
+          {
+            type: "rule",
+            encode: {
+              update: {
+                x: {
+                  signal:
+                    "selectedDim==='assist' ? scale('x','assist') : " +
+                    "selectedDim==='pass_accurate' ? scale('x','pass_accurate') : " +
+                    "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : 0"
+                },
+                y: { value: 0 },
+                y2: { signal: "height" },
+                stroke: { value: "#f4b400" },
+                strokeOpacity: {
+                  signal:
+                    "(selectedDim==='assist' || selectedDim==='pass_accurate' || selectedDim==='ball_recovery') ? 0.85 : 0"
+                },
+                strokeWidth: {
+                  signal:
+                    "(selectedDim==='assist' || selectedDim==='pass_accurate' || selectedDim==='ball_recovery') ? 10 : 0"
+                }
+              }
+            }
+          },
+
+          // PCP lines (colored; when selected, others gray)
+          {
+            type: "group",
+            from: { facet: { name: "series", data: "points", groupby: "id" } },
+            marks: [
+              {
+                type: "line",
+                from: { data: "series" },
+                encode: {
+                  enter: {
+                    interpolate: { value: "linear" },
+                    strokeWidth: { value: 2 }
+                  },
+                  update: {
+                    x: { scale: "x", field: "dim" },
+                    y: { signal: "scale('y_' + datum.dim, datum.v)" },
+
+                    stroke: [
+                      { test: "selectedId != null && datum.id !== selectedId", value: "#b5b5b5" },
+                      { scale: "c", field: "id" }
+                    ],
+                    strokeOpacity: [
+                      { test: "selectedId != null && datum.id !== selectedId", value: 0.35 },
+                      { value: 0.9 }
+                    ],
+                    strokeWidth: [
+                      { test: "selectedId != null && datum.id === selectedId", value: 4 },
+                      { value: 2 }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+
+          // value labels when axis selected (fade if another player selected)
+          {
+            type: "text",
+            from: { data: "table" },
+            encode: {
+              update: {
+                opacity: {
+                  signal:
+                    "(selectedDim==='assist' || selectedDim==='pass_accurate' || selectedDim==='ball_recovery') ? " +
+                    "(selectedId!=null ? (datum.id===selectedId ? 1 : 0.35) : 1) : 0"
+                },
+                x: {
+                  signal:
+                    "selectedDim==='assist' ? scale('x','assist') : " +
+                    "selectedDim==='pass_accurate' ? scale('x','pass_accurate') : " +
+                    "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : 0"
+                },
+                dx: { value: 10 },
+                y: {
+                  signal:
+                    "selectedDim==='assist' ? scale('y_assist', toNumber(datum.assist)) : " +
+                    "selectedDim==='pass_accurate' ? scale('y_pass_accurate', toNumber(datum.pass_accurate)) : " +
+                    "selectedDim==='ball_recovery' ? scale('y_ball_recovery', toNumber(datum.ball_recovery)) : 0"
+                },
+                text: {
+                  signal:
+                    "selectedDim==='assist' ? ''+datum.assist : " +
+                    "selectedDim==='pass_accurate' ? ''+datum.pass_accurate : " +
+                    "selectedDim==='ball_recovery' ? ''+datum.ball_recovery : ''"
+                },
+                fontSize: { value: 12 },
+                fontWeight: { value: "bold" },
+                baseline: { value: "middle" },
+                align: { value: "left" },
+                fill: [
+                  { test: "selectedId != null && datum.id !== selectedId", value: "#9a9a9a" },
+                  { value: "#111" }
+                ]
+              }
+            }
+          },
+
+          // selected axis name label
+          {
+            type: "text",
+            encode: {
+              update: {
+                opacity: {
+                  signal:
+                    "(selectedDim==='assist' || selectedDim==='pass_accurate' || selectedDim==='ball_recovery') ? 1 : 0"
+                },
+                x: {
+                  signal:
+                    "selectedDim==='assist' ? scale('x','assist') : " +
+                    "selectedDim==='pass_accurate' ? scale('x','pass_accurate') : " +
+                    "selectedDim==='ball_recovery' ? scale('x','ball_recovery') : 0"
+                },
+                y: { signal: "height/2" },
+                dx: { value: 14 },
+                angle: { value: -90 },
+
+                text: { signal: "replace(selectedDim, '_', ' ')" },
+
+                fontWeight: { value: "bold" },
+                fontSize: { value: 12 },
+                fill: { value: "#111" },
+                align: { value: "center" },
+                baseline: { value: "middle" },
+
+                background: { value: "rgba(0,0,0,0.10)" },
+                padding: { value: 6 },
+                cornerRadius: { value: 4 }
+              }
+            }
+          }
+        ]
+      };
+    }
+
+    // JS hit testing helpers
+    function linearScale(domain, range) {
+      const [d0, d1] = domain;
+      const [r0, r1] = range;
+      const m = (r1 - r0) / (d1 - d0);
+      return (v) => r0 + (v - d0) * m;
+    }
+
+    function distPointToSegment(px, py, x1, y1, x2, y2) {
+      const vx = x2 - x1, vy = y2 - y1;
+      const wx = px - x1, wy = py - y1;
+      const c1 = vx * wx + vy * wy;
+      if (c1 <= 0) return Math.hypot(px - x1, py - y1);
+      const c2 = vx * vx + vy * vy;
+      if (c2 <= c1) return Math.hypot(px - x2, py - y2);
+      const t = c1 / c2;
+      const projx = x1 + t * vx, projy = y1 + t * vy;
+      return Math.hypot(px - projx, py - projy);
+    }
+
+    // render
+    let currentView = null;
+
+    async function render() {
+      if (currentView) {
+        try { currentView.finalize(); } catch (e) {}
+        currentView = null;
+      }
+      const mount = document.getElementById("vis");
+      mount.innerHTML = "";
+
+      const outerSide = getOuterSide();
+      const { innerW, innerH } = computeInnerBox(outerSide, PAD);
+
+      const embed = await vegaEmbed("#vis", specPanel2(innerW, innerH), { actions: false, renderer: "canvas" });
+      const view = embed.view;
+      currentView = view;
+
+      const TOTAL_W = innerW + PAD.left + PAD.right;
+      const TOTAL_H = innerH + PAD.top + PAD.bottom;
+
+      const axisX = { assist: 0, pass_accurate: innerW / 2, ball_recovery: innerW };
+
+      const yMap = {
+        assist:        linearScale(window.EXTENTS.assist,        [innerH, 0]),
+        pass_accurate: linearScale(window.EXTENTS.pass_accurate, [innerH, 0]),
+        ball_recovery: linearScale(window.EXTENTS.ball_recovery, [innerH, 0])
+      };
+
+      function broadcastState(nextId, nextDim) {
+        PCP_CHANNEL.postMessage({ type: "state", id: nextId, dim: nextDim, sender: WINDOW_ID });
+      }
+
+      function setState(nextId, nextDim, doBroadcast = true) {
+        view.signal("selectedId", nextId);
+        view.signal("selectedDim", nextDim);
+        view.runAsync();
+        if (doBroadcast && !applyingRemote) broadcastState(nextId, nextDim);
+      }
+
+      function onCanvasClick(evt) {
+        const canvas = document.querySelector("#vis canvas");
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const vx = (evt.clientX - rect.left) * (TOTAL_W / rect.width);
+        const vy = (evt.clientY - rect.top)  * (TOTAL_H / rect.height);
+
+        const x = vx - PAD.left;
+        const y = vy - PAD.top;
+
+        if (x < -5 || x > innerW + 5 || y < -5 || y > innerH + 5) return;
+
+        // axis click
+        const AXIS_THRESH = 16;
+        for (const dim of PANEL_DIMS) {
+          if (Math.abs(x - axisX[dim]) <= AXIS_THRESH) {
+            const curDim = view.signal("selectedDim");
+            const nextDim = (curDim === dim) ? null : dim;
+            setState(null, nextDim, true);
+            return;
+          }
+        }
+
+        // line click
+        const LINE_THRESH = 10;
+        let best = { id: null, d: Infinity };
+
+        for (const row of window.DATA) {
+          const p0 = { x: axisX.assist,        y: yMap.assist(Number(row.assist)) };
+          const p1 = { x: axisX.pass_accurate, y: yMap.pass_accurate(Number(row.pass_accurate)) };
+          const p2 = { x: axisX.ball_recovery, y: yMap.ball_recovery(Number(row.ball_recovery)) };
+
+          const d = Math.min(
+            distPointToSegment(x, y, p0.x, p0.y, p1.x, p1.y),
+            distPointToSegment(x, y, p1.x, p1.y, p2.x, p2.y)
+          );
+
+          if (d < best.d) best = { id: row.id, d };
+        }
+
+        if (best.d <= LINE_THRESH) {
+          const curId = view.signal("selectedId");
+          const nextId = (curId === best.id) ? null : best.id;
+          setState(nextId, null, true);
+        }
+      }
+
+      const canvas = document.querySelector("#vis canvas");
+      canvas.addEventListener("click", onCanvasClick);
+
+      PCP_CHANNEL.onmessage = (e) => {
+        const msg = e.data;
+
+        // fold first
+        handleFoldMessage(msg);
+
+        // state sync
+        if (!msg || msg.sender === WINDOW_ID) return;
+        if (msg.type !== "state") return;
+
+        applyingRemote = true;
+        setState(msg.id ?? null, msg.dim ?? null, false);
+        applyingRemote = false;
+      };
+    }
+
+    render().catch(console.error);
+
+    // keep sizing consistent on resize
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => render().catch(console.error), 80);
+    });
+  </script>
+</body>
+</html>

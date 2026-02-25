@@ -1,0 +1,469 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>radar page (Folded State)</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script src="./shared.js"></script>
+
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; }
+    #wrap{
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: white;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    #vis{
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Unfold button styled like fold button, bottom-center */
+    #unfoldBtn{
+      position: fixed;
+      /* left: 50%;
+      bottom: 14px;
+      transform: translateX(-50%); */
+      right: 10px;
+      bottom: 10px;
+      left: auto;
+      transform: none;
+      z-index: 9999;
+
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.2);
+      background: rgba(255,255,255,0.95);
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+      user-select: none;
+      touch-action: manipulation;
+    }
+  </style>
+</head>
+
+<body>
+<div id="wrap">
+  <div id="vis"></div>
+  <button id="unfoldBtn" title="Open PCP panels">Unfold device</button>
+</div>
+
+<script>
+  // Inputs from shared.js ----
+  const DATA = window.DATA;
+  const DIMS = window.DIMS;
+  const EXTENTS = window.EXTENTS;
+
+  // Layout
+  const PAD = { top: 24, left: 24, right: 24, bottom: 24 };
+
+  // PCP palette
+  const PLAYER_COLORS = ["#1f77ff", "#2a8530", "#9b51e0"];
+
+  function getSide(){
+    return Math.floor(Math.min(window.innerWidth, window.innerHeight));
+  }
+
+  // Vega spec
+  function specRadar(side){
+    return {
+      $schema: "https://vega.github.io/schema/vega/v5.json",
+      width: side,
+      height: side,
+      padding: PAD,
+
+      signals: [
+        { name: "dims", value: DIMS },
+        { name: "extents", value: EXTENTS },
+        { name: "selectedId", value: null }
+      ],
+
+      data: [
+        { name: "table", values: DATA },
+
+        // Selected row (for bottom-left label)
+        {
+          name: "selectedRow",
+          source: "table",
+          transform: [
+            { type: "filter", expr: "selectedId != null && datum.id === selectedId" }
+          ]
+        },
+
+        // Long form: per (player, dim)
+        {
+          name: "long",
+          source: "table",
+          transform: [
+            { type: "fold", fields: DIMS, as: ["dim", "raw"] },
+            { type: "formula", as: "v", expr: "toNumber(datum.raw)" },
+            {
+              type: "formula",
+              as: "t",
+              expr:
+                "(datum.v - extents[datum.dim][0]) / " +
+                "(extents[datum.dim][1] - extents[datum.dim][0])"
+            },
+            { type: "formula", as: "idx", expr: "indexof(dims, datum.dim)" },
+            { type: "formula", as: "ang", expr: "(-PI/2) + 2*PI*(datum.idx)/length(dims)" }
+          ]
+        },
+
+        // Vertex coords per player
+        {
+          name: "verts",
+          source: "long",
+          transform: [
+            { type: "formula", as: "R",  expr: "min(width, height) * 0.38" },
+            { type: "formula", as: "cx", expr: "width/2" },
+            { type: "formula", as: "cy", expr: "height/2" },
+            { type: "formula", as: "r",  expr: "clamp(datum.t, 0, 1) * datum.R" },
+            { type: "formula", as: "x",  expr: "datum.cx + datum.r * cos(datum.ang)" },
+            { type: "formula", as: "y",  expr: "datum.cy + datum.r * sin(datum.ang)" }
+          ]
+        },
+
+        // Selected player's points for axis-value labels
+        {
+          name: "selPoints",
+          source: "verts",
+          transform: [
+            { type: "filter", expr: "selectedId != null && datum.id === selectedId" },
+            { type: "formula", as: "ux", expr: "cos(datum.ang)" },
+            { type: "formula", as: "uy", expr: "sin(datum.ang)" },
+            // Slightly outward so text sits on/near the axis outside the vertex
+            { type: "formula", as: "lx", expr: "datum.x + 10 * datum.ux" },
+            { type: "formula", as: "ly", expr: "datum.y + 10 * datum.uy" }
+          ]
+        },
+
+        // Axes metadata (spokes + dim labels)
+        {
+          name: "axes",
+          values: DIMS.map((d, i) => ({ dim: d, idx: i })),
+          transform: [
+            { type: "formula", as: "dimLabel", expr: "replace(datum.dim, '_', ' ')" },
+            { type: "formula", as: "R",  expr: "min(width, height) * 0.38" },
+            { type: "formula", as: "cx", expr: "width/2" },
+            { type: "formula", as: "cy", expr: "height/2" },
+            { type: "formula", as: "ang", expr: "(-PI/2) + 2*PI*(datum.idx)/length(dims)" },
+            { type: "formula", as: "x2", expr: "datum.cx + datum.R * cos(datum.ang)" },
+            { type: "formula", as: "y2", expr: "datum.cy + datum.R * sin(datum.ang)" },
+            { type: "formula", as: "lx", expr: "datum.cx + (datum.R + 18) * cos(datum.ang)" },
+            { type: "formula", as: "ly", expr: "datum.cy + (datum.R + 18) * sin(datum.ang)" }
+          ]
+        },
+
+        // Rings grid
+        {
+          name: "rings",
+          values: [{ t: 0.25 }, { t: 0.5 }, { t: 0.75 }, { t: 1.0 }],
+          transform: [
+            { type: "formula", as: "R",  expr: "min(width, height) * 0.38" },
+            { type: "formula", as: "cx", expr: "width/2" },
+            { type: "formula", as: "cy", expr: "height/2" },
+            { type: "formula", as: "r",  expr: "datum.t * datum.R" }
+          ]
+        }
+      ],
+
+      scales: [
+        // Same palette as PCP 
+        {
+          name: "c",
+          type: "ordinal",
+          domain: { data: "table", field: "id" },
+          range: PLAYER_COLORS
+        }
+      ],
+
+      marks: [
+        // Rings
+        {
+          type: "arc",
+          from: { data: "rings" },
+          encode: {
+            update: {
+              x: { field: "cx" },
+              y: { field: "cy" },
+              startAngle: { value: 0 },
+              endAngle: { value: 2 * Math.PI },
+              innerRadius: { field: "r" },
+              outerRadius: { field: "r" },
+              stroke: { value: "rgba(0,0,0,0.18)" },
+              strokeWidth: { value: 1 }
+            }
+          }
+        },
+
+        // axes
+        {
+          type: "rule",
+          from: { data: "axes" },
+          encode: {
+            update: {
+              x: { signal: "width/2" },
+              y: { signal: "height/2" },
+              x2: { field: "x2" },
+              y2: { field: "y2" },
+              stroke: { value: "rgba(0,0,0,0.35)" },
+              strokeWidth: { value: 1.5 }
+            }
+          }
+        },
+
+        // labels 
+        {
+          type: "text",
+          from: { data: "axes" },
+          encode: {
+            update: {
+              x: { field: "lx" },
+              y: { field: "ly" },
+              text: { field: "dimLabel" },
+              fontSize: { value: 12 },
+              fontWeight: { value: "bold" },
+              fill: { value: "rgba(0,0,0,0.85)" },
+              align: [
+                { test: "cos(datum.ang) > 0.3", value: "left" },
+                { test: "cos(datum.ang) < -0.3", value: "right" },
+                { value: "center" }
+              ],
+              baseline: [
+                { test: "sin(datum.ang) > 0.3", value: "top" },
+                { test: "sin(datum.ang) < -0.3", value: "bottom" },
+                { value: "middle" }
+              ]
+            }
+          }
+        },
+
+        // Polygons (one per player)
+        {
+          type: "group",
+          from: { facet: { name: "series", data: "verts", groupby: "id" } },
+          marks: [
+            {
+              type: "line",
+              from: { data: "series" },
+              encode: {
+                enter: {
+                  interpolate: { value: "linear-closed" },
+                  strokeWidth: { value: 2 }
+                },
+                update: {
+                  x: { field: "x" },
+                  y: { field: "y" },
+
+                  // Color + gray-out others when selected
+                  stroke: [
+                    { test: "selectedId != null && parent.id !== selectedId", value: "#b5b5b5" },
+                    { scale: "c", field: { parent: "id" } }
+                  ],
+                  fill: [
+                    { test: "selectedId != null && parent.id !== selectedId", value: "rgba(180,180,180,0.12)" },
+                    { scale: "c", field: { parent: "id" } }
+                  ],
+
+                  fillOpacity: [
+                    { test: "selectedId != null && parent.id !== selectedId", value: 0.08 },
+                    { test: "selectedId != null && parent.id === selectedId", value: 0.28 },
+                    { value: 0.18 }
+                  ],
+                  strokeOpacity: [
+                    { test: "selectedId != null && parent.id !== selectedId", value: 0.35 },
+                    { value: 0.9 }
+                  ],
+                  strokeWidth: [
+                    { test: "parent.id === selectedId", value: 3.2 },
+                    { value: 2 }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+
+        // Value labels on each axis for the selected player
+        {
+          type: "text",
+          from: { data: "selPoints" },
+          encode: {
+            update: {
+              opacity: { signal: "selectedId != null ? 1 : 0" },
+              x: { field: "lx" },
+              y: { field: "ly" },
+
+             
+              text: { signal: "replace(datum.dim,'_',' ') + ': ' + datum.raw" },
+
+              fontSize: { value: 12 },
+              fontWeight: { value: "bold" },
+
+              // label + value use same color as polygon
+              fill: { scale: "c", field: "id" },
+
+              align: [
+                { test: "datum.ux > 0.3", value: "left" },
+                { test: "datum.ux < -0.3", value: "right" },
+                { value: "center" }
+              ],
+              baseline: [
+                { test: "datum.uy > 0.3", value: "top" },
+                { test: "datum.uy < -0.3", value: "bottom" },
+                { value: "middle" }
+              ]
+            }
+          }
+        },
+
+        // Selected player name (bottom-left), same color as polygon
+        {
+          type: "text",
+          from: { data: "selectedRow" },
+          encode: {
+            update: {
+              x: { value: 0 },
+              y: { signal: "height" },
+              dx: { value: 2 },
+              dy: { value: -14 },
+              text: { signal: "'Selected: ' + datum.label" },
+              fontSize: { value: 14 },
+              fontWeight: { value: "bold" },
+              fill: { scale: "c", field: "id" },
+              align: { value: "left" },
+              baseline: { value: "bottom" }
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  // DOM-side polygon hit-testing
+  function pointInPoly(px, py, poly){
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = ((yi > py) !== (yj > py)) &&
+        (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function renderRadar(){
+    const side = getSide();
+    vegaEmbed("#vis", specRadar(side), { actions: false, renderer: "canvas" })
+      .then(({ view }) => {
+        const canvas = view.container().querySelector("canvas");
+
+        function getViewCoords(evt){
+          const rect = canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          const viewW = canvas.width / dpr;
+          const viewH = canvas.height / dpr;
+          const vx = (evt.clientX - rect.left) * (viewW / rect.width);
+          const vy = (evt.clientY - rect.top)  * (viewH / rect.height);
+          return { vx, vy };
+        }
+
+        function buildPolys(){
+          // verts x/y are inner coords; convert to view coords by adding padding
+          const verts = view.data("verts");
+          const byId = new Map();
+          for (const v of verts) {
+            if (!byId.has(v.id)) byId.set(v.id, []);
+            byId.get(v.id).push({ idx: v.idx, x: v.x + PAD.left, y: v.y + PAD.top });
+          }
+          const polys = [];
+          for (const [id, pts] of byId.entries()) {
+            pts.sort((a, b) => a.idx - b.idx);
+            polys.push({ id, pts: pts.map(p => ({ x: p.x, y: p.y })) });
+          }
+          return polys;
+        }
+
+        canvas.addEventListener("pointerdown", (evt) => {
+  const polys = buildPolys();
+  const { vx, vy } = getViewCoords(evt);
+
+  let hit = null;
+  for (const p of polys) {
+    if (pointInPoly(vx, vy, p.pts)) { hit = p.id; break; }
+  }
+
+  const cur = view.signal("selectedId");
+
+  // If hit a polygon: toggle that polygon
+  // Otherwise: clear selection
+  const next = (hit != null) ? ((cur === hit) ? null : hit) : null;
+
+  if (next !== cur) {
+    view.signal("selectedId", next);
+    view.runAsync();
+  }
+});
+      })
+      .catch(console.error);
+  }
+
+  renderRadar();
+  window.addEventListener("resize", () => renderRadar());
+
+  // Folded -> Unfolded (open 3 PCP panels in separate windows)
+  function openPCPWindows() {
+    const panelOuter = Math.floor(Math.min(window.outerWidth, window.outerHeight));
+
+    try { window.resizeTo(panelOuter, panelOuter); } catch (e) {}
+
+    const baseLeft = (typeof window.screenX === "number") ? window.screenX : 50;
+    const baseTop  = (typeof window.screenY === "number") ? window.screenY : 80;
+
+    const w1Outer = window.outerWidth || panelOuter;
+
+    const features = (left) =>
+      `popup=yes,width=${panelOuter},height=${panelOuter},left=${left},top=${baseTop},resizable=no,scrollbars=no`;
+
+    // Open siblings first
+    const w2 = window.open("./panel2.html", "pcp-panel-2", features(baseLeft + w1Outer));
+    const w3 = window.open("./panel3.html", "pcp-panel-3", features(baseLeft + w1Outer * 2));
+
+    if (!w2 || !w3) {
+      alert("Popup blocked. Please allow popups for this site.");
+      return;
+    }
+
+    window.location.href = "./panel1.html";
+  }
+
+  // unfold button
+  document.getElementById("unfoldBtn").addEventListener("click", () => openPCPWindows());
+
+  // double-tap behavior as an extra 
+  let lastTap = 0;
+  document.getElementById("unfoldBtn").addEventListener("pointerdown", () => {
+    const now = Date.now();
+    if (now - lastTap < 350) {
+      openPCPWindows();
+      lastTap = 0;
+    } else {
+      lastTap = now;
+    }
+  });
+</script>
+</body>
+</html>
