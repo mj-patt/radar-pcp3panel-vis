@@ -30,10 +30,7 @@
 
     /* Unfold button styled like fold button, bottom-center */
     #unfoldBtn{
-      position: fixed;
-      /* left: 50%;
-      bottom: 14px;
-      transform: translateX(-50%); */
+      /* position: fixed;
       right: 10px;
       bottom: 10px;
       left: auto;
@@ -49,7 +46,8 @@
       cursor: pointer;
       box-shadow: 0 4px 12px rgba(0,0,0,0.10);
       user-select: none;
-      touch-action: manipulation;
+      touch-action: manipulation; */
+      display: none;
     }
   </style>
 </head>
@@ -65,6 +63,10 @@
   const DATA = window.DATA;
   const DIMS = window.DIMS;
   const EXTENTS = window.EXTENTS;
+
+  //broadcast selection from controller
+  const WINDOW_ID = crypto.randomUUID();
+const PCP_CHANNEL = window.PCP_CHANNEL;
 
   // Layout
   const PAD = { top: 24, left: 24, right: 24, bottom: 24 };
@@ -233,6 +235,7 @@
               x: { field: "lx" },
               y: { field: "ly" },
               text: { field: "dimLabel" },
+              fontFamily: {value: "sans-serif"},
               fontSize: { value: 12 },
               fontWeight: { value: "bold" },
               fill: { value: "rgba(0,0,0,0.85)" },
@@ -340,6 +343,7 @@
               dx: { value: 2 },
               dy: { value: -14 },
               text: { signal: "'Selected: ' + datum.label" },
+              fontFamily: {value: "sans-serif"},
               fontSize: { value: 14 },
               fontWeight: { value: "bold" },
               fill: { scale: "c", field: "id" },
@@ -365,89 +369,206 @@
     return inside;
   }
 
-  function renderRadar(){
-    const side = getSide();
-    vegaEmbed("#vis", specRadar(side), { actions: false, renderer: "canvas" })
-      .then(({ view }) => {
-        const canvas = view.container().querySelector("canvas");
+//   function renderRadar(){
+//     const side = getSide();
+//     vegaEmbed("#vis", specRadar(side), { actions: false, renderer: "canvas" })
+//       .then(({ view }) => {
+//         const canvas = view.container().querySelector("canvas");
 
-        function getViewCoords(evt){
-          const rect = canvas.getBoundingClientRect();
-          const dpr = window.devicePixelRatio || 1;
-          const viewW = canvas.width / dpr;
-          const viewH = canvas.height / dpr;
-          const vx = (evt.clientX - rect.left) * (viewW / rect.width);
-          const vy = (evt.clientY - rect.top)  * (viewH / rect.height);
-          return { vx, vy };
+//         function getViewCoords(evt){
+//           const rect = canvas.getBoundingClientRect();
+//           const dpr = window.devicePixelRatio || 1;
+//           const viewW = canvas.width / dpr;
+//           const viewH = canvas.height / dpr;
+//           const vx = (evt.clientX - rect.left) * (viewW / rect.width);
+//           const vy = (evt.clientY - rect.top)  * (viewH / rect.height);
+//           return { vx, vy };
+//         }
+
+//         function buildPolys(){
+//           // verts x/y are inner coords; convert to view coords by adding padding
+//           const verts = view.data("verts");
+//           const byId = new Map();
+//           for (const v of verts) {
+//             if (!byId.has(v.id)) byId.set(v.id, []);
+//             byId.get(v.id).push({ idx: v.idx, x: v.x + PAD.left, y: v.y + PAD.top });
+//           }
+//           const polys = [];
+//           for (const [id, pts] of byId.entries()) {
+//             pts.sort((a, b) => a.idx - b.idx);
+//             polys.push({ id, pts: pts.map(p => ({ x: p.x, y: p.y })) });
+//           }
+//           return polys;
+//         }
+
+//         canvas.addEventListener("pointerdown", (evt) => {
+//   const polys = buildPolys();
+//   const { vx, vy } = getViewCoords(evt);
+
+//   let hit = null;
+//   for (const p of polys) {
+//     if (pointInPoly(vx, vy, p.pts)) { hit = p.id; break; }
+//   }
+
+//   const cur = view.signal("selectedId");
+
+//   // If hit a polygon: toggle that polygon
+//   // Otherwise: clear selection
+//   const next = (hit != null) ? ((cur === hit) ? null : hit) : null;
+
+//   if (next !== cur) {
+//     view.signal("selectedId", next);
+//     view.runAsync();
+//   }
+// });
+//       })
+//       .catch(console.error);
+//   }
+
+function renderRadar(){
+  const side = getSide();
+
+  vegaEmbed("#vis", specRadar(side), { actions: false, renderer: "canvas" })
+    .then(({ view }) => {
+      const canvas = view.container().querySelector("canvas");
+
+      function getViewCoords(evt){
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const viewW = canvas.width / dpr;
+        const viewH = canvas.height / dpr;
+        const vx = (evt.clientX - rect.left) * (viewW / rect.width);
+        const vy = (evt.clientY - rect.top)  * (viewH / rect.height);
+        return { vx, vy };
+      }
+
+      function buildPolys(){
+        const verts = view.data("verts");
+        const byId = new Map();
+
+        for (const v of verts) {
+          if (!byId.has(v.id)) byId.set(v.id, []);
+          byId.get(v.id).push({
+            idx: v.idx,
+            x: v.x + PAD.left,
+            y: v.y + PAD.top
+          });
         }
 
-        function buildPolys(){
-          // verts x/y are inner coords; convert to view coords by adding padding
-          const verts = view.data("verts");
-          const byId = new Map();
-          for (const v of verts) {
-            if (!byId.has(v.id)) byId.set(v.id, []);
-            byId.get(v.id).push({ idx: v.idx, x: v.x + PAD.left, y: v.y + PAD.top });
+        const polys = [];
+        for (const [id, pts] of byId.entries()) {
+          pts.sort((a, b) => a.idx - b.idx);
+          polys.push({
+            id,
+            pts: pts.map(p => ({ x: p.x, y: p.y }))
+          });
+        }
+        return polys;
+      }
+
+      function setRadarSelection(nextId, broadcast = true) {
+        view.signal("selectedId", nextId);
+        view.runAsync();
+
+        if (broadcast) {
+          PCP_CHANNEL.postMessage({
+            type: "state",
+            id: nextId,
+            dim: null,
+            sender: WINDOW_ID
+          });
+        }
+      }
+
+      canvas.addEventListener("pointerdown", (evt) => {
+        const polys = buildPolys();
+        const { vx, vy } = getViewCoords(evt);
+
+        let hit = null;
+        for (const p of polys) {
+          if (pointInPoly(vx, vy, p.pts)) {
+            hit = p.id;
+            break;
           }
-          const polys = [];
-          for (const [id, pts] of byId.entries()) {
-            pts.sort((a, b) => a.idx - b.idx);
-            polys.push({ id, pts: pts.map(p => ({ x: p.x, y: p.y })) });
-          }
-          return polys;
         }
 
-        canvas.addEventListener("pointerdown", (evt) => {
-  const polys = buildPolys();
-  const { vx, vy } = getViewCoords(evt);
+        const cur = view.signal("selectedId");
+        const next = (hit != null) ? ((cur === hit) ? null : hit) : null;
 
-  let hit = null;
-  for (const p of polys) {
-    if (pointInPoly(vx, vy, p.pts)) { hit = p.id; break; }
-  }
+        if (next !== cur) {
+          setRadarSelection(next, true);
+        }
+      });
 
-  const cur = view.signal("selectedId");
+      PCP_CHANNEL.addEventListener("message", (e) => {
+        const msg = e.data;
+        if (!msg || msg.sender === WINDOW_ID) return;
 
-  // If hit a polygon: toggle that polygon
-  // Otherwise: clear selection
-  const next = (hit != null) ? ((cur === hit) ? null : hit) : null;
+        if (msg.type === "state") {
+          // Radar only supports player highlighting, not axis highlighting.
+          // If controller sends id, highlight that player.
+          // If controller sends axis only, clear radar selection.
+          view.signal("selectedId", msg.id ?? null);
+          view.runAsync();
+        }
 
-  if (next !== cur) {
-    view.signal("selectedId", next);
-    view.runAsync();
-  }
-});
-      })
-      .catch(console.error);
-  }
-
+        // fold/unfold do not need any action in radar
+      });
+    })
+    .catch(console.error);
+}
   renderRadar();
   window.addEventListener("resize", () => renderRadar());
 
   // Folded -> Unfolded (open 3 PCP panels in separate windows)
+  // function openPCPWindows() {
+  //   const panelOuter = Math.floor(Math.min(window.outerWidth, window.outerHeight));
+
+  //   try { window.resizeTo(panelOuter, panelOuter); } catch (e) {}
+
+  //   const baseLeft = (typeof window.screenX === "number") ? window.screenX : 50;
+  //   const baseTop  = (typeof window.screenY === "number") ? window.screenY : 80;
+
+  //   const w1Outer = window.outerWidth || panelOuter;
+
+  //   const features = (left) =>
+  //     `popup=yes,width=${panelOuter},height=${panelOuter},left=${left},top=${baseTop},resizable=no,scrollbars=no`;
+
+  //   // Open siblings first
+  //   const w2 = window.open("./panel2.html", "pcp-panel-2", features(baseLeft + w1Outer));
+  //   const w3 = window.open("./panel3.html", "pcp-panel-3", features(baseLeft + w1Outer * 2));
+
+  //   if (!w2 || !w3) {
+  //     alert("Popup blocked. Please allow popups for this site.");
+  //     return;
+  //   }
+
+  //   window.location.href = "./panel1.html";
+  // }
+  let pcpWindows = [];
+
   function openPCPWindows() {
     const panelOuter = Math.floor(Math.min(window.outerWidth, window.outerHeight));
-
-    try { window.resizeTo(panelOuter, panelOuter); } catch (e) {}
 
     const baseLeft = (typeof window.screenX === "number") ? window.screenX : 50;
     const baseTop  = (typeof window.screenY === "number") ? window.screenY : 80;
 
-    const w1Outer = window.outerWidth || panelOuter;
+    const gap = 20;
+    const startLeft = baseLeft + (window.outerWidth || panelOuter) + gap;
 
     const features = (left) =>
       `popup=yes,width=${panelOuter},height=${panelOuter},left=${left},top=${baseTop},resizable=no,scrollbars=no`;
 
-    // Open siblings first
-    const w2 = window.open("./panel2.html", "pcp-panel-2", features(baseLeft + w1Outer));
-    const w3 = window.open("./panel3.html", "pcp-panel-3", features(baseLeft + w1Outer * 2));
+    const w1 = window.open("./panel1.html", "pcp-panel-1", features(startLeft));
+    const w2 = window.open("./panel2.html", "pcp-panel-2", features(startLeft + panelOuter));
+    const w3 = window.open("./panel3.html", "pcp-panel-3", features(startLeft + panelOuter * 2));
 
-    if (!w2 || !w3) {
+    if (!w1 || !w2 || !w3) {
       alert("Popup blocked. Please allow popups for this site.");
       return;
     }
 
-    window.location.href = "./panel1.html";
+    pcpWindows = [w1, w2, w3];
   }
 
   // unfold button

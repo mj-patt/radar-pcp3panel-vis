@@ -46,11 +46,12 @@
 
     // fold mechanics
     function doFoldLocal() {
-      if (PANEL_ROLE === "panel1") {
-        window.location.href = "./radar.html";
-      } else {
-        try { window.close(); } catch (e) {}
-      }
+      // if (PANEL_ROLE === "panel1") {
+      //   window.location.href = "./radar.html";
+      // } else {
+      //   try { window.close(); } catch (e) {}
+      // }
+      try { window.close(); } catch (e) {}
     }
     function handleFoldMessage(msg) {
       if (!msg || msg.sender === WINDOW_ID) return;
@@ -374,20 +375,44 @@
       const canvas = document.querySelector("#vis canvas");
       canvas.addEventListener("click", onCanvasClick);
 
-      PCP_CHANNEL.onmessage = (e) => {
-        const msg = e.data;
+      // PCP_CHANNEL.onmessage = (e) => {
+      //   const msg = e.data;
 
-        // fold first
-        handleFoldMessage(msg);
+      //   // fold first
+      //   handleFoldMessage(msg);
 
-        // state sync
-        if (!msg || msg.sender === WINDOW_ID) return;
-        if (msg.type !== "state") return;
+      //   // state sync
+      //   if (!msg || msg.sender === WINDOW_ID) return;
+      //   if (msg.type !== "state") return;
 
-        applyingRemote = true;
-        setState(msg.id ?? null, msg.dim ?? null, false);
-        applyingRemote = false;
-      };
+      //   applyingRemote = true;
+      //   setState(msg.id ?? null, msg.dim ?? null, false);
+      //   applyingRemote = false;
+      // };
+
+      PCP_CHANNEL.addEventListener("message", (e) => {
+  const msg = e.data;
+
+  if (!msg || msg.sender === WINDOW_ID) return;
+
+
+  if (msg.type === "fold") {
+    doFoldLocal();
+    return;
+  }
+
+ 
+  if (msg.type === "unfold") {
+    return;
+  }
+
+ 
+  if (msg.type === "state") {
+    applyingRemote = true;
+    setState(msg.id ?? null, msg.dim ?? null, false);
+    applyingRemote = false;
+  }
+});
     }
 
     render().catch(console.error);

@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Foldable Controller</title>
+<script src="./shared.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #080b10;
+    --surface:  #0d1117;
+    --surface2: #161b22;
+    --border:   #21262d;
+    --border2:  #30363d;
+    --text:     #e6edf3;
+    --muted:    #7d8590;
+    --accent:   #58a6ff;
+    --orange:   #d29922;
+  }
+
+  html, body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: sans-serif;
+    font-size: 13px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .logo-text {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 20px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .card.full {
+    grid-column: 1 / -1;
+  }
+
+  .card-title {
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .card-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .mode-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .mode-btn {
+    padding: 14px 8px;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .mode-btn:hover {
+    border-color: var(--border2);
+    color: var(--text);
+  }
+
+  .mode-btn.active {
+    background: rgba(88,166,255,0.08);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .status-box {
+    display: grid;
+    gap: 8px;
+  }
+
+  .status-line {
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .status-line strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .button-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chip-btn {
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chip-btn:hover {
+    border-color: var(--border2);
+    background: #1b222c;
+  }
+
+  .chip-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(88,166,255,0.08);
+  }
+
+  .chip-btn.axis.active {
+    border-color: var(--orange);
+    color: var(--orange);
+    background: rgba(210,153,34,0.10);
+  }
+
+  .action-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .step-btn {
+    flex: 1;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .step-btn:hover { background: var(--border); }
+  .step-btn:active { transform: scale(0.98); }
+
+  .muted-note {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .log-card {
+    grid-column: 1 / -1;
+    max-height: 180px;
+  }
+
+  #event-log {
+    max-height: 130px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 2px;
+  }
+
+  .log-entry {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .log-entry .ts   { color: var(--border2); margin-right: 6px; }
+  .log-entry .type { margin-right: 4px; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-text">Foldable Device Controller</div>
+</header>
+
+<div class="layout">
+  <div class="card">
+    <div class="card-title">Device State</div>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="btn-folded">Folded</button>
+      <button class="mode-btn" id="btn-unfolded">Unfolded</button>
+    </div>
+    <div class="muted-note">
+      Folded keeps only the radar window. Unfolded opens panel1, panel2, and panel3 in separate windows.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Window Status</div>
+    <div class="status-box">
+      <div class="status-line">radar <strong>managed separately</strong></div>
+      <div class="status-line">panel1 <strong id="status-panel1">closed</strong></div>
+      <div class="status-line">panel2 <strong id="status-panel2">closed</strong></div>
+      <div class="status-line">panel3 <strong id="status-panel3">closed</strong></div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div class="card-title">Player Selection</div>
+    <div class="button-grid" id="playerButtons"></div>
+    <div class="action-row">
+      <button class="step-btn" id="clearPlayerBtn">Clear player</button>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div class="card-title">Axis Selection</div>
+    <div class="button-grid" id="axisButtons"></div>
+    <div class="action-row">
+      <button class="step-btn" id="clearAxisBtn">Clear axis</button>
+    </div>
+  </div>
+
+  <div class="card log-card">
+    <div class="card-title">Event Log</div>
+    <div id="event-log"></div>
+  </div>
+</div>
+
+<script>
+  const PCP_CHANNEL = window.PCP_CHANNEL;
+  const DATA = Array.isArray(window.DATA) ? window.DATA : [];
+  const DIMS = Array.isArray(window.DIMS) ? window.DIMS : [];
+
+  let currentPlayerId = null;
+  let currentDim = null;
+  let currentMode = "folded";
+
+  let panelWindows = {
+    panel1: null,
+    panel2: null,
+    panel3: null
+  };
+
+  function isOpen(win) {
+    return !!win && !win.closed;
+  }
+
+  function panelFeatures(left, top, size) {
+    return `popup=yes,width=${size},height=${size},left=${left},top=${top},resizable=no,scrollbars=no`;
+  }
+
+  function openPanels() {
+    const size = 520;
+    const baseLeft = (typeof window.screenX === "number" ? window.screenX : 60) + (window.outerWidth || 420) + 20;
+    const baseTop = typeof window.screenY === "number" ? window.screenY : 80;
+    const gap = 10;
+
+    if (!isOpen(panelWindows.panel1)) {
+      panelWindows.panel1 = window.open(
+        "./panel1.html",
+        "pcp-panel-1",
+        panelFeatures(baseLeft, baseTop, size)
+      );
+    }
+
+    if (!isOpen(panelWindows.panel2)) {
+      panelWindows.panel2 = window.open(
+        "./panel2.html",
+        "pcp-panel-2",
+        panelFeatures(baseLeft + size + gap, baseTop, size)
+      );
+    }
+
+    if (!isOpen(panelWindows.panel3)) {
+      panelWindows.panel3 = window.open(
+        "./panel3.html",
+        "pcp-panel-3",
+        panelFeatures(baseLeft + (size + gap) * 2, baseTop, size)
+      );
+    }
+
+    if (!panelWindows.panel1 || !panelWindows.panel2 || !panelWindows.panel3) {
+      alert("Popup blocked. Please allow popups for this site.");
+      return;
+    }
+
+    currentMode = "unfolded";
+    syncModeButtons();
+    updateWindowStatus();
+    log("unfold", "opened panel1, panel2, panel3", true);
+  }
+
+  function closePanelsLocally() {
+    Object.values(panelWindows).forEach((win) => {
+      try {
+        if (isOpen(win)) win.close();
+      } catch (e) {}
+    });
+
+    panelWindows = {
+      panel1: null,
+      panel2: null,
+      panel3: null
+    };
+
+    updateWindowStatus();
+  }
+
+  function foldPanels() {
+    PCP_CHANNEL.postMessage({
+      type: "fold",
+      sender: "controller"
+    });
+
+    closePanelsLocally();
+    currentMode = "folded";
+    syncModeButtons();
+    log("fold", "closed panel1, panel2, panel3", true);
+  }
+
+  function sendState(id, dim) {
+    currentPlayerId = id;
+    currentDim = dim;
+
+    PCP_CHANNEL.postMessage({
+      type: "state",
+      id,
+      dim,
+      sender: "controller"
+    });
+
+    syncSelectionButtons();
+    log("state", JSON.stringify({ id, dim }), true);
+  }
+
+  function selectPlayer(playerId) {
+    sendState(playerId, null);
+  }
+
+  function selectAxis(dim) {
+    sendState(null, dim);
+  }
+
+  function clearPlayer() {
+    if (currentDim != null) {
+      sendState(null, currentDim);
+    } else {
+      sendState(null, null);
+    }
+  }
+  function clearAxis() {
+  sendState(currentPlayerId ?? null, null);
+}
+
+function clearPlayer() {
+  sendState(null, currentDim ?? null);
+}
+
+
+  function updateWindowStatus() {
+    document.getElementById("status-panel1").textContent = isOpen(panelWindows.panel1) ? "open" : "closed";
+    document.getElementById("status-panel2").textContent = isOpen(panelWindows.panel2) ? "open" : "closed";
+    document.getElementById("status-panel3").textContent = isOpen(panelWindows.panel3) ? "open" : "closed";
+  }
+
+  function syncModeButtons() {
+    document.getElementById("btn-folded").classList.toggle("active", currentMode === "folded");
+    document.getElementById("btn-unfolded").classList.toggle("active", currentMode === "unfolded");
+  }
+
+  function syncSelectionButtons() {
+    document.querySelectorAll("[data-player-id]").forEach((btn) => {
+      const id = Number(btn.dataset.playerId);
+      btn.classList.toggle("active", currentPlayerId === id);
+    });
+
+    document.querySelectorAll("[data-dim]").forEach((btn) => {
+      btn.classList.toggle("active", currentDim === btn.dataset.dim);
+    });
+  }
+
+  function initPlayerButtons() {
+    const container = document.getElementById("playerButtons");
+
+    DATA.forEach((row) => {
+      const btn = document.createElement("button");
+      btn.className = "chip-btn";
+      btn.textContent = row.label || String(row.id);
+      btn.dataset.playerId = String(row.id);
+
+      btn.addEventListener("click", () => {
+        selectPlayer(row.id);
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  function initAxisButtons() {
+    const container = document.getElementById("axisButtons");
+
+    DIMS.forEach((dim) => {
+      const btn = document.createElement("button");
+      btn.className = "chip-btn axis";
+      btn.textContent = dim.replaceAll("_", " ");
+      btn.dataset.dim = dim;
+
+      btn.addEventListener("click", () => {
+        selectAxis(dim);
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  function log(type, detail, outgoing = false) {
+    const el = document.createElement("div");
+    el.className = "log-entry";
+    const now = new Date();
+    const ts = now.toTimeString().slice(0, 8) + "." + String(now.getMilliseconds()).padStart(3, "0");
+    el.innerHTML =
+      `<span class="ts">${ts}</span>` +
+      `<span class="type" style="color:${outgoing ? "#d29922" : "#58a6ff"}">${outgoing ? "→" : "←"} ${type}</span>` +
+      `<span>${detail.length > 90 ? detail.slice(0, 90) + "…" : detail}</span>`;
+
+    const logEl = document.getElementById("event-log");
+    logEl.prepend(el);
+
+    while (logEl.children.length > 40) {
+      logEl.removeChild(logEl.lastChild);
+    }
+  }
+
+  document.getElementById("btn-folded").addEventListener("click", foldPanels);
+  document.getElementById("btn-unfolded").addEventListener("click", openPanels);
+  document.getElementById("clearPlayerBtn").addEventListener("click", clearPlayer);
+  document.getElementById("clearAxisBtn").addEventListener("click", clearAxis);
+
+  PCP_CHANNEL.addEventListener("message", (e) => {
+    const msg = e.data;
+    if (!msg) return;
+
+    if (msg.type === "fold") {
+      currentMode = "folded";
+      syncModeButtons();
+      setTimeout(updateWindowStatus, 100);
+      log("fold", "received fold broadcast");
+      return;
+    }
+
+    if (msg.type === "state") {
+      if (msg.sender !== "controller") {
+        currentPlayerId = msg.id ?? null;
+        currentDim = msg.dim ?? null;
+        syncSelectionButtons();
+        log("state", JSON.stringify({ id: currentPlayerId, dim: currentDim }));
+      }
+    }
+  });
+
+  window.addEventListener("beforeunload", () => {
+    closePanelsLocally();
+  });
+
+  initPlayerButtons();
+  initAxisButtons();
+  syncModeButtons();
+  syncSelectionButtons();
+  updateWindowStatus();
+</script>
+</body>
+</html>

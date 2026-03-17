@@ -14,7 +14,7 @@
     #vis { width: 100vw; height: 100vh; }
 
     #foldBtn{
-  position: fixed;
+  /* position: fixed;
   left: 50%;
   bottom: 14px;
   transform: translateX(-130%);
@@ -26,7 +26,8 @@
   border: 1px solid rgba(0,0,0,0.2);
   background: white;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.10); */
+  display: none;
 }
   </style>
 </head>
@@ -49,7 +50,7 @@
     const LABEL_LIMIT_PAD = 10;     // keep text inside view
     const LABEL_FONT = 12;
     const LABEL_LINE_H = 12;        // line-height for 2-line names, FAILEDddd :C
-    const LABEL_DY_STEP = 10;       // small stable offset by rank
+    const LABEL_DY_STEP = 3;       // small stable offset by rank
     const LABEL_GLOBAL_LIFT = 14;   // lift whole stack up a bit more
 
     const WINDOW_ID = crypto.randomUUID();
@@ -71,11 +72,12 @@
 
     // fold mechanics
     function doFoldLocal() {
-      if (PANEL_ROLE === "panel1") {
-        window.location.href = "./radar.html";
-      } else {
-        try { window.close(); } catch (e) {}
-      }
+      // if (PANEL_ROLE === "panel1") {
+      //   window.location.href = "./radar.html";
+      // } else {
+      //   try { window.close(); } catch (e) {}
+      // }
+      try { window.close(); } catch (e) {}
     }
 
     function handleFoldMessage(msg) {
@@ -476,20 +478,40 @@
       if (canvas) canvas.addEventListener("click", onCanvasClick);
 
       // receive remote state + fold
-      PCP_CHANNEL.onmessage = (e) => {
-        const msg = e.data;
+      // PCP_CHANNEL.onmessage = (e) => {
+      //   const msg = e.data;
 
-        // fold first
-        handleFoldMessage(msg);
+      //   // fold first
+      //   handleFoldMessage(msg);
 
-        // state sync
-        if (!msg || msg.sender === WINDOW_ID) return;
-        if (msg.type !== "state") return;
+      //   // state sync
+      //   if (!msg || msg.sender === WINDOW_ID) return;
+      //   if (msg.type !== "state") return;
 
-        applyingRemote = true;
-        setState(msg.id ?? null, msg.dim ?? null, false);
-        applyingRemote = false;
-      };
+      //   applyingRemote = true;
+      //   setState(msg.id ?? null, msg.dim ?? null, false);
+      //   applyingRemote = false;
+      // };
+      PCP_CHANNEL.addEventListener("message", (e) => {
+  const msg = e.data;
+
+  if (!msg || msg.sender === WINDOW_ID) return;
+
+  if (msg.type === "fold") {
+    doFoldLocal();
+    return;
+  }
+
+  if (msg.type === "unfold") {
+    return;
+  }
+
+  if (msg.type === "state") {
+    applyingRemote = true;
+    setState(msg.id ?? null, msg.dim ?? null, false);
+    applyingRemote = false;
+  }
+});
     }
 
     render().catch(console.error);
